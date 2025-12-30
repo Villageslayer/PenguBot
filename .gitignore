@@ -1,3 +1,10 @@
 .__pycache__
 .venv
 640; // 
+__pycache__/mouse_mover.cpython-311.pyc
+__pycache__/ObjectDetector.cpython-311.pyc
+assets/models/sunxds_0.8.1_FP8.engine
+gui/__pycache__/ConfigManager.cpython-311.pyc
+gui/__pycache__/effects.cpython-311.pyc
+gui/__pycache__/GUI.cpython-311.pyc
+gui/__pycache__/iconbutton.cpython-311.pyc
