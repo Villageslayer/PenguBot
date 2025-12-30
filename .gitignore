@@ -8,3 +8,4 @@ gui/__pycache__/ConfigManager.cpython-311.pyc
 gui/__pycache__/effects.cpython-311.pyc
 gui/__pycache__/GUI.cpython-311.pyc
 gui/__pycache__/iconbutton.cpython-311.pyc
+*/__pycache__/*
