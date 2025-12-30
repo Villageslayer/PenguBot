@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout
 from PyQt5.QtGui import QPainter
 from .colors import get_theme_manager # Use theme manager
 from gui.widgets.Settings import (SettingsDropdown, SettingsSlider, SettingsBoolean, ScrollableSettingsWidget,
-                                  SettingsKeybind)
+                                  SettingsKeybind, SettingsCollapsibleSection)
 from gui.widgets.Header import HeaderWidget
 
 
@@ -41,83 +41,103 @@ class AimbotWidget(QWidget):
         container_layout.addWidget(aimbot_label)
 
 
+        # General Section
+        general_section = SettingsCollapsibleSection("General")
+        container_layout.addWidget(general_section)
+
         toggle = SettingsBoolean("Aimbot Toggle", True)
-        container_layout.addWidget(toggle)
+        general_section.addWidget(toggle)
         self.config_manager.register_setting("Aimbot", "enabled", toggle)
 
-        # Trigger Key
         trigger_key = SettingsKeybind("Trigger Key", 0x02) # Default Right Click
-        container_layout.addWidget(trigger_key)
+        general_section.addWidget(trigger_key)
         self.config_manager.register_setting("Aimbot", "trigger_key", trigger_key)
 
-        # Scout Macro Toggle
         scout_macro_toggle = SettingsBoolean("Scout Macro", False) # Default to False
-        container_layout.addWidget(scout_macro_toggle)
+        general_section.addWidget(scout_macro_toggle)
         self.config_manager.register_setting("Aimbot", "scout_macro", scout_macro_toggle)
 
-        speed = SettingsSlider("Speed", 0.001 , 0.5, 0.085, allow_decimals=True)
-        container_layout.addWidget(speed)
-        self.config_manager.register_setting("Aimbot", "speed", speed)
+        # Targeting Section
+        targeting_section = SettingsCollapsibleSection("Targeting")
+        container_layout.addWidget(targeting_section)
 
         fov_slider = SettingsSlider("FOV", 100, 640, 500, allow_decimals=False)
-        container_layout.addWidget(fov_slider)
+        targeting_section.addWidget(fov_slider)
         self.config_manager.register_setting("Aimbot", "fov", fov_slider)
 
-        #fps_slider = SettingsSlider("Capture FPS", 10, 200, 120, allow_decimals=False)
-        #container_layout.addWidget(fps_slider)
-        #self.config_manager.register_setting("Aimbot", "fps", fps_slider)
+        aim_fov_slider = SettingsSlider("Aim FOV Size", 1, 350, 100, allow_decimals=False)
+        targeting_section.addWidget(aim_fov_slider)
+        self.config_manager.register_setting("Aimbot", "aim_fov", aim_fov_slider)
 
         targeting_mode = SettingsDropdown("Targeting Mode", ["Closest", "Confidence"])
-        container_layout.addWidget(targeting_mode)
+        targeting_section.addWidget(targeting_mode)
         self.config_manager.register_setting("Aimbot", "targeting_mode", targeting_mode)
 
-        target_slider_1 = SettingsSlider("target height (1)", 0.01, 1.0, 0.25, allow_decimals=True)
-        container_layout.addWidget(target_slider_1)
+        target_slider_1 = SettingsSlider("Target Height (1)", 0.01, 1.0, 0.25, allow_decimals=True)
+        targeting_section.addWidget(target_slider_1)
         self.config_manager.register_setting("Aimbot", "target_height_1", target_slider_1)
 
-        target_slider_2 = SettingsSlider("target height (2)", 0.01, 1.0, 0.25, allow_decimals=True)
-        container_layout.addWidget(target_slider_2)
+        target_slider_2 = SettingsSlider("Target Height (2)", 0.01, 1.0, 0.25, allow_decimals=True)
+        targeting_section.addWidget(target_slider_2)
         self.config_manager.register_setting("Aimbot", "target_height_2", target_slider_2)
+        
+        target_stickiness = SettingsSlider("Target Stickiness", 0.1, 1, 0.7, allow_decimals=True)
+        targeting_section.addWidget(target_stickiness)
+        self.config_manager.register_setting("Aimbot", "target_stickiness", target_stickiness)
 
-        # recoil slider
+        # Motion Section
+        motion_section = SettingsCollapsibleSection("Motion")
+        container_layout.addWidget(motion_section)
+
+        movement_type = SettingsDropdown("Movement Type", ["classic", "spring"])
+        motion_section.addWidget(movement_type)
+        self.config_manager.register_setting("Aimbot", "movement_type", movement_type)
+
+        speed = SettingsSlider("Speed", 0.001 , 5.0, 0.085, allow_decimals=True)
+        motion_section.addWidget(speed)
+        self.config_manager.register_setting("Aimbot", "speed", speed)
+
+        max_speed = SettingsSlider("Max Speed Cap", 10, 500, 127, allow_decimals=False)
+        motion_section.addWidget(max_speed)
+        self.config_manager.register_setting("Aimbot", "max_speed_cap", max_speed)
+        
+        min_speed = SettingsSlider("Min Speed Multiplier", 0.01, 1.0, 0.15, allow_decimals=True)
+        motion_section.addWidget(min_speed)
+        self.config_manager.register_setting("Aimbot", "min_speed_multiplier", min_speed)
+        
+        smoothing = SettingsSlider("Smoothing Factor", 0.01, 1.0, 0.5, allow_decimals=True)
+        motion_section.addWidget(smoothing)
+        self.config_manager.register_setting("Aimbot", "smoothing_factor", smoothing)
+
+        acceleration = SettingsSlider("Acceleration Factor", 0.1, 5.0, 1.5, allow_decimals=True)
+        motion_section.addWidget(acceleration)
+        self.config_manager.register_setting("Aimbot", "acceleration_factor", acceleration)
+
+        # Spring Mechanics (Sub-section logic or separate section)
+        spring_section = SettingsCollapsibleSection("Spring Mechanics")
+        container_layout.addWidget(spring_section)
+        
+        stiffness = SettingsSlider("Spring Stiffness", 10.0, 500.0, 150.0, allow_decimals=True)
+        spring_section.addWidget(stiffness)
+        self.config_manager.register_setting("Aimbot", "spring_stiffness", stiffness)
+
+        damping = SettingsSlider("Spring Damping", 0.1, 10.0, 1.0, allow_decimals=True)
+        spring_section.addWidget(damping)
+        self.config_manager.register_setting("Aimbot", "spring_damping", damping)
+
+        # Recoil Control Section
+        recoil_section = SettingsCollapsibleSection("Recoil Control")
+        container_layout.addWidget(recoil_section)
+
         recoil_slider = SettingsSlider("Recoil", 0.01, 1.1, 0.03, allow_decimals=True)
-        container_layout.addWidget(recoil_slider)
+        recoil_section.addWidget(recoil_slider)
         self.config_manager.register_setting("Aimbot", "recoil", recoil_slider)
 
-        # max recoil
         max_recoil_slider = SettingsSlider("Max Recoil", 1.0, 5.0, 2.0, allow_decimals=True)
-        container_layout.addWidget(max_recoil_slider)
+        recoil_section.addWidget(max_recoil_slider)
         self.config_manager.register_setting("Aimbot", "max_recoil", max_recoil_slider)
 
-        # Add Triggerbot Section
-        triggerbot_label = QLabel("Triggerbot Settings")
-        triggerbot_label.setStyleSheet(f"color: {self.theme_manager.get_color('TEXT').name()}; font-family: Roboto; font-size: 16px; font-weight: bold; margin-top: 20px;")
-        container_layout.addWidget(triggerbot_label)
-        
-        # Triggerbot Toggle
-        triggerbot_toggle = SettingsBoolean("Triggerbot Toggle", False)
-        container_layout.addWidget(triggerbot_toggle)
-        self.config_manager.register_setting("Triggerbot", "enabled", triggerbot_toggle)
-        
-        # Triggerbot Delay
-        trigger_delay = SettingsSlider("Trigger Delay (ms)", 0, 500, 100, allow_decimals=False)
-        container_layout.addWidget(trigger_delay)
-        self.config_manager.register_setting("Triggerbot", "delay", trigger_delay)
-        
-        # Triggerbot Confidence
-        trigger_confidence = SettingsSlider("Confidence Threshold", 0.5, 1.0, 0.8, allow_decimals=True)
-        container_layout.addWidget(trigger_confidence)
-        self.config_manager.register_setting("Triggerbot", "confidence", trigger_confidence)
-        
-        # Triggerbot Mode
-        trigger_mode = SettingsDropdown("Trigger Mode", ["Any Target", "High Confidence", "In Crosshair"])
-        container_layout.addWidget(trigger_mode)
-        self.config_manager.register_setting("Triggerbot", "mode", trigger_mode)
-        
-        # Trigger Hold Time
-        trigger_hold = SettingsSlider("Hold Time (ms)", 10, 300, 50, allow_decimals=False)
-        container_layout.addWidget(trigger_hold)
-        self.config_manager.register_setting("Triggerbot", "hold_time", trigger_hold)
+
 
         # Add stretch to push all widgets to the top
         container_layout.addStretch()

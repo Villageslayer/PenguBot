@@ -60,6 +60,15 @@ class AIWidget(QWidget):
         max_fps_capture = SettingsSlider("Max FPS Capture", 1, 200, 80, allow_decimals=False)
         container_layout.addWidget(max_fps_capture)
         self.config_manager.register_setting("AI", "max_fps_capture", max_fps_capture)
+
+        # Training Data Collector Settings
+        training_enabled = SettingsBoolean("Training Data Collector", False)
+        container_layout.addWidget(training_enabled)
+        self.config_manager.register_setting("AI", "training_enabled", training_enabled)
+
+        training_confidence = SettingsSlider("Training Confidence", 0.01, 1.0, 0.40, allow_decimals=True)
+        container_layout.addWidget(training_confidence)
+        self.config_manager.register_setting("AI", "training_confidence", training_confidence)
         container_layout.addStretch()
 
         scroll_area.setWidget(container)

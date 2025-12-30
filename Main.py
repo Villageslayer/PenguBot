@@ -3,8 +3,14 @@ import time
 import bettercam
 import cv2
 import cv2
+<<<<<<< HEAD
 #from render.inference_fps import FPSOverlay
 #from render.capture import ScreenCapture
+=======
+from render.inference_fps import FPSOverlay
+from render.capture import ScreenCapture
+from render.fov import FOVOverlay, AimFOVOverlay
+>>>>>>> main
 from win32api import GetSystemMetrics
 from ObjectDetector import FastObjectDetector
 from gui.widgets.colors import theme_manager # Import theme_manager instead of Colors
@@ -37,11 +43,6 @@ RIGHT = LEFT + REGION_WIDTH
 BOTTOM = TOP + REGION_HEIGHT
 
 multiplier = 0.12
-
-key_states = {
-    0x31: False,  # Key '1'
-    0x32: False,  # Key '2'
-}
 
 # UpdateThread and associated classes moved to render.inference_fps
 
@@ -79,24 +80,8 @@ class FrameRingBuffer:
             # Return frame AND the processed count as a sequence ID
             return self.buffer[prev_write].copy(), self.frames_processed
 
-class FOVOverlay(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("FOV Overlay")
-        self.setGeometry(LEFT, TOP, REGION_WIDTH, REGION_HEIGHT)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        theme_manager.themeChanged.connect(self.update) # Update on theme change
-
-    def paintEvent(self, event):
-        if not settings_manager.config.get("Visual", {}).get("fov", True):
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        border_color = theme_manager.get_color("PRIMARY") # Use theme_manager
-        border_color.setAlpha(80)
-        painter.setPen(QPen(border_color, 1))
-        painter.drawRect(0, 0, REGION_WIDTH, REGION_HEIGHT)
+# FPSOverlay moved to render.inference_fps
+# FOVOverlay moved to render.fov
 
 # Note:
 # Not on Git for some reason
@@ -139,13 +124,17 @@ original_multiplier = None
 
 # Create a function to update settings when config changes
 def update_settings_from_config():
-    global multiplier
-    # If we're not in midst of adjustment, update multiplier to current setting
-    if not left_click_held or original_multiplier is None:
+    global multiplier, original_multiplier
+    # If we're not in midst of recoil adjustment, update multiplier to current setting
+    if not left_click_held:
         if win32api.GetAsyncKeyState(0x31) < 0:
-            multiplier = settings_manager.get("Aimbot.target_height_1", 0.18)
+            new_mult = settings_manager.get("Aimbot.target_height_1", 0.18)
+            multiplier = new_mult
+            original_multiplier = new_mult
         elif win32api.GetAsyncKeyState(0x32) < 0:
-            multiplier = settings_manager.get("Aimbot.target_height_2", 0.11)
+            new_mult = settings_manager.get("Aimbot.target_height_2", 0.11)
+            multiplier = new_mult
+            original_multiplier = new_mult
 
 
 # Register the observer with the settings manager to be notified of changes
@@ -159,48 +148,54 @@ def update_multiplier():
     target_height_2 = settings_manager.get("Aimbot.target_height_2", 0.11)
     base_height_increment = settings_manager.get("Aimbot.recoil", 0.03)
 
+    # Handle key 1 press (toggle, not hold)
     if win32api.GetAsyncKeyState(0x31) < 0 and not key_states[0x31]:
         multiplier = target_height_1
+        original_multiplier = target_height_1  # Also update original to prevent recoil reset issues
         key_states[0x31] = True
     elif win32api.GetAsyncKeyState(0x31) >= 0:
         key_states[0x31] = False
 
+    # Handle key 2 press (toggle, not hold)
     if win32api.GetAsyncKeyState(0x32) < 0 and not key_states[0x32]:
         multiplier = target_height_2
+        original_multiplier = target_height_2  # Also update original to prevent recoil reset issues
         key_states[0x32] = True
     elif win32api.GetAsyncKeyState(0x32) >= 0:
         key_states[0x32] = False
 
     trigger_key = settings_manager.get("Aimbot.trigger_key", 0x05)
-    # Debug print to verify key and state
-    # print(f"Trigger Key: {trigger_key}, State: {win32api.GetAsyncKeyState(trigger_key)}")
     
     right_click_held = (win32api.GetAsyncKeyState(trigger_key) & 0x8000) != 0
     left_click_current = (win32api.GetAsyncKeyState(0x01) & 0x8000) != 0
 
     if not right_click_held:
+        # Reset recoil state when not aiming
         if left_click_held and original_multiplier is not None:
             multiplier = original_multiplier
-            original_multiplier = None
+        original_multiplier = None
         left_click_held = False
         return
 
     current_speed = settings_manager.get("Aimbot.speed", 0.08)
-
     height_increment = base_height_increment * current_speed
 
     if left_click_current:
         if not left_click_held:
+            # Just started shooting - save current multiplier
             left_click_held = True
             original_multiplier = multiplier
 
-        max_recoil_factor = settings_manager.get("Aimbot.max_recoil", 2.0)
-        max_value = original_multiplier * max_recoil_factor
-        multiplier = min(multiplier + height_increment, max_value)
+        if original_multiplier is not None:
+            max_recoil_factor = settings_manager.get("Aimbot.max_recoil", 2.0)
+            max_value = original_multiplier * max_recoil_factor
+            multiplier = min(multiplier + height_increment, max_value)
 
     elif left_click_held:
+        # Just released left click - restore original multiplier
         left_click_held = False
-        multiplier = original_multiplier
+        if original_multiplier is not None:
+            multiplier = original_multiplier
         original_multiplier = None
 
 def frame_producer(capture, frame_buffer):
@@ -214,22 +209,19 @@ def main():
     app = QApplication([])
     detection_overlay = DetectionOverlay()
     fps_overlay = FPSOverlay()
-    fov_overlay = FOVOverlay()
+    fov_overlay = FOVOverlay(REGION_WIDTH, REGION_HEIGHT, LEFT, TOP, settings_manager)
+    aim_fov_overlay = AimFOVOverlay(REGION_WIDTH, REGION_HEIGHT, LEFT, TOP, settings_manager)
     detection_overlay.show()
     fps_overlay.show()
     fov_overlay.show()
+    aim_fov_overlay.show()
 
     # Mouse movement setup with larger queue
     mouse_movement_queue = Queue(maxsize=1)
 
     def mouse_movement_worker():
         mouse = MouseMover(
-            smoothing="linear",
-            get_speed=lambda: settings_manager.get("Aimbot.speed", 0.08),
-            # ADD THIS LINE BELOW:
-            get_trigger_key=lambda: settings_manager.get("Aimbot.trigger_key", 0x05),
-            easing_strength=3,
-            control_strength=0.9
+            settings_getter=lambda key, default: settings_manager.get(key, default)
         )
         last_position = None
         while True:
@@ -283,6 +275,9 @@ def main():
         update_gui_counter = 0  # Counter for GUI updates
 
         last_processed_seq_id = -1
+        
+        # Target tracking for sticky aiming
+        current_target_box = None
 
         while True:
             frame, seq_id = frame_buffer.get_latest_frame()
@@ -313,33 +308,96 @@ def main():
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
             boxes = detector.detect(frame_rgb)
 
-            # Find closest box
+            # Find best target with sticky tracking
             circle_positions = []
             if boxes:
-                closest_box = None
-                min_distance_sq = float('inf')
-                region_center_x_norm = 0.5
-                region_center_y_norm = 0.5
+                # In FPS games, crosshair is always at center (mouse is relative)
+                center_x_norm = 0.5
+                center_y_norm = 0.5
+                aim_fov_radius = settings_manager.get("Aimbot.aim_fov", 100.0)
+                normalized_radius_sq = (aim_fov_radius / REGION_WIDTH) ** 2
+                
+                # 1. Collect ALL detections for overlay display
+                for box in boxes:
+                    x1, y1, x2, y2 = box['bbox']
+                    x1_abs, y1_abs = x1 * REGION_WIDTH, y1 * REGION_HEIGHT
+                    x2_abs, y2_abs = x2 * REGION_WIDTH, y2 * REGION_HEIGHT
+                    
+                    circle_x = int((x1_abs + x2_abs) / 2)
+                    circle_y = int(y1_abs + (y2_abs - y1_abs) * multiplier)
+                    circle_positions.append((circle_x, circle_y))
 
+                # 2. Find best target WITHIN Aim FOV
+                # Target stickiness threshold - require this much closer before switching
+                # (as a ratio, e.g., 0.7 means new target must be 70% of current distance)
+                stickiness = settings_manager.get("Aimbot.target_stickiness", 0.7)
+                
+                best_box = None
+                best_distance_sq = float('inf')
+                
                 for box in boxes:
                     x1, y1, x2, y2 = box['bbox']
                     box_center_x = (x1 + x2) / 2
-                    box_center_y = (y1 + y2) / 2
-                    distance_sq = (box_center_x - region_center_x_norm) ** 2 + (
-                            box_center_y - region_center_y_norm) ** 2
-                    if distance_sq < min_distance_sq:
-                        min_distance_sq = distance_sq
-                        closest_box = box
-
-                if closest_box:
-                    x1, y1, x2, y2 = closest_box['bbox']
-                    x1_abs = x1 * REGION_WIDTH
-                    y1_abs = y1 * REGION_HEIGHT
-                    x2_abs = x2 * REGION_WIDTH
-                    y2_abs = y2 * REGION_HEIGHT
-
-                    circle_x = int((x1_abs + x2_abs) / 2)
-                    circle_y = int(y1_abs + (y2_abs - y1_abs) * multiplier)
+                    box_aim_y = y1 + (y2 - y1) * multiplier
+                    
+                    # Aim FOV Check: if ANY pixel of bbox is within the circle
+                    # Simplest check: check if the distance from circle center to the closest point in the bbox is <= radius
+                    # Coordinates are normalized [0, 1]
+                    closest_x = max(x1, min(center_x_norm, x2))
+                    closest_y = max(y1, min(center_y_norm, y2))
+                    dist_to_center_sq = (closest_x - center_x_norm)**2 + (closest_y - center_y_norm)**2
+                    
+                    if dist_to_center_sq > normalized_radius_sq:
+                        continue # Outside Aim FOV
+                    
+                    # Distance from crosshair (center) to aim point
+                    distance_sq = (box_center_x - center_x_norm) ** 2 + (box_aim_y - center_y_norm) ** 2
+                    
+                    if distance_sq < best_distance_sq:
+                        best_distance_sq = distance_sq
+                        best_box = box
+                
+                # 3. Apply stickiness - check if we should keep current target
+                # ENFORCE Aim FOV even for sticky targets
+                if current_target_box is not None:
+                    prev_box = current_target_box
+                    # Find if previous target still exists (by checking overlap)
+                    for box in boxes:
+                        bx1, by1, bx2, by2 = box['bbox']
+                        px1, py1, px2, py2 = prev_box['bbox']
+                        
+                        # Check if boxes overlap significantly (same target)
+                        overlap_x = max(0, min(bx2, px2) - max(bx1, px1))
+                        overlap_y = max(0, min(by2, py2) - max(by1, py1))
+                        box_area = (bx2 - bx1) * (by2 - by1)
+                        overlap_area = overlap_x * overlap_y
+                        
+                        if box_area > 0 and overlap_area / box_area > 0.3:
+                            # Previous target still exists
+                            # CRITICAL: Re-check Aim FOV for this specific box
+                            closest_x = max(bx1, min(center_x_norm, bx2))
+                            closest_y = max(by1, min(center_y_norm, by2))
+                            dist_to_center_sq = (closest_x - center_x_norm)**2 + (closest_y - center_y_norm)**2
+                            
+                            if dist_to_center_sq <= normalized_radius_sq:
+                                box_center_x = (bx1 + bx2) / 2
+                                box_aim_y = by1 + (by2 - by1) * multiplier
+                                prev_distance_sq = (box_center_x - center_x_norm) ** 2 + (box_aim_y - center_y_norm) ** 2
+                                
+                                # Only switch if new target is significantly closer
+                                if best_distance_sq >= prev_distance_sq * stickiness:
+                                    # Keep current target
+                                    best_box = box
+                                    best_distance_sq = prev_distance_sq
+                            break # Found physical target, stop looking in current frames
+                
+                # Store current target for next frame
+                current_target_box = best_box
+                
+                if best_box:
+                    x1, y1, x2, y2 = best_box['bbox']
+                    circle_x = int((x1 * REGION_WIDTH + x2 * REGION_WIDTH) / 2)
+                    circle_y = int(y1 * REGION_HEIGHT + (y2 * REGION_HEIGHT - y1 * REGION_HEIGHT) * multiplier)
 
                     screen_x = LEFT + circle_x
                     screen_y = TOP + circle_y
@@ -350,8 +408,9 @@ def main():
                             mouse_movement_queue.put_nowait((screen_x, screen_y))
                         except Full:
                             pass
-
-                    circle_positions.append((circle_x, circle_y))
+            else:
+                # No detections - clear current target
+                current_target_box = None
 
             # Update GUI less frequently (every 2 frames)
             update_gui_counter += 1
