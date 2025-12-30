@@ -3,8 +3,8 @@ import time
 import bettercam
 import cv2
 import cv2
-from render.inference_fps import FPSOverlay
-from render.capture import ScreenCapture
+#from render.inference_fps import FPSOverlay
+#from render.capture import ScreenCapture
 from win32api import GetSystemMetrics
 from ObjectDetector import FastObjectDetector
 from gui.widgets.colors import theme_manager # Import theme_manager instead of Colors
@@ -45,7 +45,7 @@ key_states = {
 
 # UpdateThread and associated classes moved to render.inference_fps
 
-
+# Why ? Bettercam has this built in.
 class FrameRingBuffer:
     def __init__(self, buffer_size=3, frame_shape=None):
         self.size = buffer_size
@@ -98,6 +98,8 @@ class FOVOverlay(QWidget):
         painter.setPen(QPen(border_color, 1))
         painter.drawRect(0, 0, REGION_WIDTH, REGION_HEIGHT)
 
+# Note:
+# Not on Git for some reason
 # FPSOverlay moved to render.inference_fps
 
 
