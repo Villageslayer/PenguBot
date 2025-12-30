@@ -672,3 +672,94 @@ class SettingsKeybind(SettingsPanelMixin, QWidget):
 
     def set_value(self, value):
         self.keybind_btn.set_value(value)
+
+
+class SettingsCollapsibleSection(QWidget):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.theme_manager = get_theme_manager()
+        self.animation_duration = 200
+        self.is_expanded = False
+        self.content_height = 0
+        
+        # Main Layout
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+        
+        # Header Button
+        self.toggle_button = QPushButton(title)
+        self.toggle_button.setCursor(Qt.PointingHandCursor)
+        self.toggle_button.setFixedHeight(40) # Header height
+        self.toggle_button.clicked.connect(self.toggle)
+        self.main_layout.addWidget(self.toggle_button)
+        
+        # Content Wrapper (for animation)
+        self.content_area = QWidget()
+        self.content_area.setMaximumHeight(0) # Start collapsed
+        self.content_layout = QVBoxLayout(self.content_area)
+        self.content_layout.setContentsMargins(0, 10, 0, 10) # Padding inside section
+        self.content_layout.setSpacing(8)
+        self.main_layout.addWidget(self.content_area)
+        
+        # Animation
+        self.animation = QPropertyAnimation(self, b"maximumHeight")
+        self.animation.setDuration(self.animation_duration)
+        self.animation.setEasingCurve(QEasingCurve.InOutQuad)
+        
+        # Content Height Animation
+        self.content_animation = QPropertyAnimation(self.content_area, b"maximumHeight")
+        self.content_animation.setDuration(self.animation_duration)
+        self.content_animation.setEasingCurve(QEasingCurve.InOutQuad)
+        
+        self.theme_manager.themeChanged.connect(self.update_styles)
+        self.update_styles()
+        
+    def addWidget(self, widget):
+        self.content_layout.addWidget(widget)
+        
+    def toggle(self):
+        self.is_expanded = not self.is_expanded
+        
+        # Calculate content height
+        content_height = self.content_layout.sizeHint().height()
+        
+        if self.is_expanded:
+            self.content_animation.setStartValue(0)
+            self.content_animation.setEndValue(content_height)
+            # Rotate arrow (visual only, handled by style update in real app usually, 
+            # here we might just toggle text or rely on update_styles if we used an icon)
+        else:
+            self.content_animation.setStartValue(content_height)
+            self.content_animation.setEndValue(0)
+            
+        self.content_animation.start()
+        self.update_styles() # Update arrow direction
+        
+    def update_styles(self):
+        arrow = "▼" if self.is_expanded else "▶"
+        
+        self.toggle_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.theme_manager.get_color('SECONDARY').name()};
+                color: {self.theme_manager.get_color('TEXT').name()};
+                border: none;
+                border-radius: 5px;
+                text-align: left;
+                padding-left: 15px;
+                font-family: Roboto;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {self.theme_manager.get_color('PRIMARY').name()};
+            }}
+        """)
+        # We can append the arrow to the text or handle it separately. 
+        # For simplicity, let's just make sure the styling is clean.
+        # Ideally, use an icon, but text arrow works for now.
+        original_text = self.toggle_button.text().split("  ")[0] # Keep original text
+        self.toggle_button.setText(f"{original_text}  {arrow}")
+        
+    def paintEvent(self, event):
+        super().paintEvent(event)

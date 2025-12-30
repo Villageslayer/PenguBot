@@ -4,6 +4,8 @@ import torchvision
 import numpy as np
 import cv2
 import json
+import os
+import time
 from pathlib import Path
 
 class SettingsManager:
@@ -18,13 +20,33 @@ class SettingsManager:
     def load_settings(self):
         try:
             config_path = Path("assets/config/settings.json")
-            with open(config_path, "r") as f:
-                self.settings = json.load(f)
+            if config_path.exists():
+                self.last_mtime = config_path.stat().st_mtime
+                with open(config_path, "r") as f:
+                    self.settings = json.load(f)
+            else:
+                self.settings = {}
+                self.last_mtime = 0
         except Exception as e:
             print(f"Error loading settings: {e}")
             self.settings = {}
+            self.last_mtime = 0
+
+    def check_reload(self):
+        try:
+            config_path = Path("assets/config/settings.json")
+            if config_path.exists():
+                current_mtime = config_path.stat().st_mtime
+                if current_mtime > getattr(self, 'last_mtime', 0):
+                    # print("Reloading settings in ObjectDetector...")
+                    self.load_settings()
+        except Exception:
+            pass
 
     def get(self, key_path, default=None):
+        # Check for updates on every get (or could throttle this)
+        self.check_reload()
+        
         keys = key_path.split('.')
         value = self.settings
         try:
@@ -151,10 +173,59 @@ class FastObjectDetector:
         self.context.execute_async_v3(stream_handle=torch.cuda.current_stream().cuda_stream)
         
         # --- GPU POST-PROCESSING ---
-        return self._process_output_gpu(self.outputs[0]['tensor'])
+        raw_results = self._process_output_gpu(self.outputs[0]['tensor'])
+        
+        # Dual-Threshold Logic for Training Data Collection
+        aimbot_conf = settings_manager.get("AI.confidence", 0.65)
+        training_enabled = settings_manager.get("AI.training_enabled", False)
+        
+        if training_enabled:
+            aimbot_results = []
+            should_save = False
+            training_conf = settings_manager.get("AI.training_confidence", 0.40)
+            
+            for res in raw_results:
+                # Filter for aimbot
+                if res['confidence'] >= aimbot_conf:
+                    aimbot_results.append(res)
+                
+                # Check for training data
+                if res['confidence'] >= training_conf:
+                    should_save = True
+            
+            if should_save:
+                try:
+                    save_dir = "training_data"
+                    if not os.path.exists(save_dir):
+                        os.makedirs(save_dir)
+                    
+                    # Use high-precision timestamp for unique filenames
+                    timestamp = f"{time.time():.4f}"
+                    filename = os.path.join(save_dir, f"{timestamp}.png")
+                    
+                    # Convert RGB back to BGR for OpenCV saving
+                    frame_bgr = cv2.cvtColor(frame_numpy, cv2.COLOR_RGB2BGR)
+                    
+                    # Save the frame
+                    cv2.imwrite(filename, frame_bgr)
+                except Exception as e:
+                    print(f"Failed to save training image: {e}")
+            
+            return aimbot_results
+        else:
+            return raw_results
 
     def _process_output_gpu(self, output_tensor):
-        CONFIDENCE_THRESHOLD = settings_manager.get("AI.confidence", 0.65)
+        aimbot_conf = settings_manager.get("AI.confidence", 0.65)
+        training_enabled = settings_manager.get("AI.training_enabled", False)
+        
+        if training_enabled:
+            training_conf = settings_manager.get("AI.training_confidence", 0.40)
+            # Use the lower of the two thresholds to capture everything needed
+            CONFIDENCE_THRESHOLD = min(aimbot_conf, training_conf)
+        else:
+            CONFIDENCE_THRESHOLD = aimbot_conf
+
         NMS_IOU_THRESHOLD = settings_manager.get("AI.nms_iou_threshold", 0.3)
 
         # Output shape is likely [1, 5+classes, 8400] or [1, 8400, 5+classes]

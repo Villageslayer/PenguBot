@@ -3,6 +3,7 @@ import struct
 import threading
 import time
 import random
+import math
 from win32api import GetSystemMetrics, GetAsyncKeyState
 
 # ==========================================
@@ -32,79 +33,108 @@ SECRET_KEY = [
     0xB1, 0x66, 0x05, 0xEB, 0x7B, 0x2F, 0x94, 0x47, 0xC4, 0x18, 0xAD, 0x5E, 0xD3, 0x8A, 0x2D, 0xFE
 ]
 
+
 class MouseMover:
-    def __init__(self, smoothing="linear", get_speed=lambda: 1, get_trigger_key=lambda: 0x05, easing_strength=1.0, control_strength=1.0):
+    """
+    MouseMover with two movement systems:
+    
+    1. "classic" - Direct percentage-based movement (original behavior, fast)
+    2. "spring" - Critically damped spring system (smooth, no oscillation)
+    
+    All parameters are fetched via callbacks so they update in real-time from settings.
+    
+    IMPORTANT: This does NOT use GetCursorPos() because in games like Valorant,
+    the cursor is hidden and its position is meaningless. The crosshair is ALWAYS
+    at screen center, and mouse movement is relative. We calculate movement as:
+    target_position - screen_center
+    """
+    
+    def __init__(self, settings_getter):
+        """
+        Initialize MouseMover.
+        
+        Args:
+            settings_getter: A callable that takes a key path and default value,
+                           returns the current setting value.
+                           Example: lambda key, default: config_manager.get(key, default)
+        """
         self.ip = ESP32_IP
         self.port = ESP32_PORT
-
-        self.get_speed = get_speed
-        self.get_trigger_key = get_trigger_key
+        self.get_setting = settings_getter
         
         self.screen_width = GetSystemMetrics(0)
         self.screen_height = GetSystemMetrics(1)
         self.center_x = self.screen_width // 2
         self.center_y = self.screen_height // 2
 
+        # UDP Socket setup
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         self.sock.setblocking(False)
 
+        # Protocol headers
         self.HEAD_MOVE = 0xAB
         self.HEAD_CLICK = 0xAC
 
-        self.target_x = self.center_x
-        self.target_y = self.center_y
-        self.current_x = self.center_x
-        self.current_y = self.center_y
+        # Target position (in screen coordinates)
+        self.target_x = float(self.center_x)
+        self.target_y = float(self.center_y)
+        self.has_target = False
+        self.target_timeout = 0.1
+        self.last_target_time = 0.0
         
+        # Velocity for spring system
+        self.velocity_x = 0.0
+        self.velocity_y = 0.0
+        
+        # Accumulated sub-pixel movement
+        self.accumulated_x = 0.0
+        self.accumulated_y = 0.0
+        
+        # Thread synchronization
         self.running = True
         self.lock = threading.Lock()
         
+        # Performance tracking
+        self.last_move_time = time.perf_counter()
+        
+        # Start worker thread
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
         
         print(f"[*] UDP Encrypted Mouse -> {self.ip}:{self.port}")
 
     def set_mouse_position(self, x, y):
+        """Set the target position for the mouse to move towards (screen coordinates)."""
         with self.lock:
-            self.target_x = max(0, min(x, self.screen_width - 1))
-            self.target_y = max(0, min(y, self.screen_height - 1))
-            self.current_x = self.center_x
-            self.current_y = self.center_y
+            self.target_x = float(max(0, min(x, self.screen_width - 1)))
+            self.target_y = float(max(0, min(y, self.screen_height - 1)))
+            self.has_target = True
+            self.last_target_time = time.perf_counter()
+    
+    def clear_target(self):
+        """Clear the current target - mouse will stop moving."""
+        with self.lock:
+            self.has_target = False
 
     def _encrypt_and_send(self, header, data1, data2=0):
         """
         FULL ENCRYPTION ENGINE - ALL BYTES ENCRYPTED
-        
-        Protocol v2.0:
-        1. Generate random Salt (0-255)
-        2. Derive 4 different keys from salt using offsets in SECRET_KEY
-        3. XOR each byte (header, data1, data2) with its own key
-        4. Calculate checksum for integrity
-        5. Send [Salt] [EncHeader] [EncData1] [EncData2] [EncChecksum]
-        
-        This ensures ALL data in the air is encrypted - no plaintext headers!
         """
         salt = random.randint(0, 255)
         
-        # Derive different keys for each byte position
-        # Using prime-ish offsets for better key distribution
         key_header = SECRET_KEY[salt]
-        key_data1 = SECRET_KEY[(salt + 73) % 256]  # Prime offset
-        key_data2 = SECRET_KEY[(salt + 149) % 256]  # Prime offset
-        key_check = SECRET_KEY[(salt + 211) % 256]  # Prime offset
+        key_data1 = SECRET_KEY[(salt + 73) % 256]
+        key_data2 = SECRET_KEY[(salt + 149) % 256]
+        key_check = SECRET_KEY[(salt + 211) % 256]
         
-        # XOR Encryption for ALL bytes
         enc_header = (header ^ key_header) & 0xFF
         enc_data1 = (data1 ^ key_data1) & 0xFF
         enc_data2 = (data2 ^ key_data2) & 0xFF
         
-        # Simple checksum: XOR of original bytes (for integrity verification)
         checksum = (header ^ data1 ^ data2) & 0xFF
         enc_checksum = (checksum ^ key_check) & 0xFF
         
-        # Packet: [Salt, EncHeader, EncData1, EncData2, EncChecksum]
-        # Salt is the only "plaintext" but it reveals nothing without the key table
         try:
             packet = struct.pack('BBBBB', salt, enc_header, enc_data1, enc_data2, enc_checksum)
             self.sock.sendto(packet, (self.ip, self.port))
@@ -112,61 +142,274 @@ class MouseMover:
             pass
 
     def click(self, button='left'):
+        """Send a mouse click."""
         btn_code = 1 if button == 'left' else 2
-        # Use encryption for clicks too
         self._encrypt_and_send(self.HEAD_CLICK, btn_code, 0)
 
-    def _calculate_relative_movement(self, current_x, current_y, target_x, target_y):
-        dx = target_x - current_x
-        dy = target_y - current_y
-        speed_val = self.get_speed()
-        max_step = max(1, int(127 * speed_val))
+    def _calculate_classic_movement(self, target_x, target_y):
+        """
+        Classic movement system - direct and fast.
+        
+        Calculates movement needed to go from screen center (crosshair) to target.
+        
+        Settings used:
+        - speed: Overall speed multiplier (0.0 - 1.0)
+        - smoothing_factor: How much of the distance to cover per frame (0.1 - 1.0)
+        - acceleration_factor: Speeds up movement when far from target (1.0 - 3.0)
+        - min_speed_multiplier: Minimum pixels to move per frame when close (0.0 - 10.0)
+        - max_speed_cap: Maximum pixels per movement (1 - 127)
+        """
+        speed = self.get_setting("Aimbot.speed", 0.1)
+        smoothing = self.get_setting("Aimbot.smoothing_factor", 0.5)
+        acceleration = self.get_setting("Aimbot.acceleration_factor", 1.5)
+        min_speed = self.get_setting("Aimbot.min_speed_multiplier", 1.0)
+        max_cap = int(self.get_setting("Aimbot.max_speed_cap", 127))
+        
+        # Calculate distance from screen center (crosshair) to target
+        dx = target_x - self.center_x
+        dy = target_y - self.center_y
+        distance = math.sqrt(dx * dx + dy * dy)
+        
+        if distance < 0.5:
+            return 0, 0
+        
+        # Base movement factor
+        factor = smoothing * speed
+        
+        # Apply acceleration for distant targets (move faster when far)
+        if distance > 50:
+            accel_bonus = min(acceleration, 1.0 + (distance / 100.0) * (acceleration - 1.0))
+            factor *= accel_bonus
+        
+        # Calculate movement
+        move_x = dx * factor
+        move_y = dy * factor
+        move_dist = math.sqrt(move_x * move_x + move_y * move_y)
+        
+        # Enforce minimum speed - if movement is too small, scale it up
+        # min_speed is the minimum pixels to move per frame
+        if move_dist > 0 and move_dist < min_speed and distance >= min_speed:
+            scale = min_speed / move_dist
+            move_x *= scale
+            move_y *= scale
+            move_dist = min_speed
+        
+        # If we're closer than min_speed pixels, just move the remaining distance
+        # (prevents overshooting)
+        if distance < min_speed:
+            move_x = dx
+            move_y = dy
+            move_dist = distance
+        
+        # Cap maximum movement
+        if move_dist > max_cap:
+            scale = max_cap / move_dist
+            move_x *= scale
+            move_y *= scale
+        
+        return move_x, move_y
 
-        if abs(dx) > max_step or abs(dy) > max_step:
-            scale = max_step / max(abs(dx), abs(dy))
-            dx = int(dx * scale)
-            dy = int(dy * scale)
-
+    def _calculate_spring_movement(self, target_x, target_y, dt):
+        """
+        Spring-damper movement system - smooth with no oscillation.
+        
+        Calculates movement needed to go from screen center (crosshair) to target.
+        
+        Settings used:
+        - speed: Scales the spring stiffness (0.0 - 1.0)
+        - spring_stiffness: Base spring constant (50 - 500)
+        - spring_damping: Damping ratio, 1.0 = critical damping (0.5 - 2.0)
+        """
+        speed = self.get_setting("Aimbot.speed", 0.1)
+        stiffness = self.get_setting("Aimbot.spring_stiffness", 150.0)
+        damping_ratio = self.get_setting("Aimbot.spring_damping", 1.0)
+        
+        # Clamp dt to prevent instability
+        dt = min(dt, 0.05)
+        if dt <= 0:
+            dt = 0.001
+        
+        # Distance from screen center (crosshair) to target
+        error_x = target_x - self.center_x
+        error_y = target_y - self.center_y
+        
+        # Scale stiffness by speed setting
+        k = stiffness * (0.5 + speed * 2.0)
+        
+        # Critical damping coefficient
+        c = 2.0 * math.sqrt(k) * damping_ratio
+        
+        # Spring-damper acceleration
+        accel_x = k * error_x - c * self.velocity_x
+        accel_y = k * error_y - c * self.velocity_y
+        
+        # Update velocity
+        self.velocity_x += accel_x * dt
+        self.velocity_y += accel_y * dt
+        
+        # Calculate displacement
+        dx = self.velocity_x * dt
+        dy = self.velocity_y * dt
+        
+        # Settle when very close and slow
+        distance = math.sqrt(error_x * error_x + error_y * error_y)
+        vel_magnitude = math.sqrt(self.velocity_x ** 2 + self.velocity_y ** 2)
+        
+        if distance < 0.5 and vel_magnitude < 5.0:
+            self.velocity_x = 0.0
+            self.velocity_y = 0.0
+            return error_x, error_y
+        
         return dx, dy
 
     def _worker_loop(self):
+        """Main movement loop."""
         while self.running:
-            trigger_key = self.get_trigger_key()
+            loop_start_time = time.perf_counter()
+            
+            # Get settings
+            target_fps = self.get_setting("Aimbot.fps", 165)
+            if target_fps <= 0:
+                target_fps = 165
+            target_frame_time = 1.0 / target_fps
+            
+            trigger_key = int(self.get_setting("Aimbot.trigger_key", 0x05))
+            movement_type = self.get_setting("Aimbot.movement_type", "classic")
+            
+            dt = loop_start_time - self.last_move_time
+            
+            # Check trigger key
             if not (GetAsyncKeyState(trigger_key) & 0x8000):
-                time.sleep(0.01)
-                continue
-
-            with self.lock:
-                tx, ty = self.target_x, self.target_y
-                cx, cy = self.current_x, self.current_y
-
-            dx, dy = self._calculate_relative_movement(cx, cy, tx, ty)
-
-            if abs(dx) <= 2 and abs(dy) <= 2:
-                time.sleep(0.001)
-                continue
-
-            if dx != 0 or dy != 0:
-                # Prepare data for encryption
-                # Convert signed (-127 to 127) to unsigned byte (0-255) for XOR math
-                # We cast to unsigned 8-bit integer
-                dx_u = dx & 0xFF
-                dy_u = dy & 0xFF
+                # Not aiming - reset state
+                self.velocity_x = 0.0
+                self.velocity_y = 0.0
+                self.accumulated_x = 0.0
+                self.accumulated_y = 0.0
+                self.has_target = False
                 
+                elapsed = time.perf_counter() - loop_start_time
+                sleep_time = max(0.0005, target_frame_time - elapsed)
+                time.sleep(sleep_time)
+                self.last_move_time = loop_start_time
+                continue
+            
+            # Check if we have a valid target
+            with self.lock:
+                has_valid_target = self.has_target
+                target_age = loop_start_time - self.last_target_time
+                
+                if target_age > self.target_timeout:
+                    has_valid_target = False
+                    self.has_target = False
+                
+                tx, ty = self.target_x, self.target_y
+            
+            if not has_valid_target:
+                # No target - don't move
+                self.velocity_x = 0.0
+                self.velocity_y = 0.0
+                self.accumulated_x = 0.0
+                self.accumulated_y = 0.0
+                
+                elapsed = time.perf_counter() - loop_start_time
+                sleep_time = max(0.0005, target_frame_time - elapsed)
+                time.sleep(sleep_time)
+                self.last_move_time = loop_start_time
+                continue
+            
+            # Calculate movement based on selected system
+            # Movement is always: target - screen_center
+            if movement_type == "spring":
+                dx, dy = self._calculate_spring_movement(tx, ty, dt)
+            else:  # classic
+                dx, dy = self._calculate_classic_movement(tx, ty)
+            
+            # Accumulate sub-pixel movement
+            self.accumulated_x += dx
+            self.accumulated_y += dy
+            
+            # Extract integer pixels
+            int_dx = int(self.accumulated_x)
+            int_dy = int(self.accumulated_y)
+            
+            # Keep remainder
+            self.accumulated_x -= int_dx
+            self.accumulated_y -= int_dy
+            
+            # Clamp to valid range
+            int_dx = max(-127, min(127, int_dx))
+            int_dy = max(-127, min(127, int_dy))
+            
+            # Send movement
+            if int_dx != 0 or int_dy != 0:
+                dx_u = int_dx & 0xFF
+                dy_u = int_dy & 0xFF
                 self._encrypt_and_send(self.HEAD_MOVE, dx_u, dy_u)
-
-                with self.lock:
-                    self.current_x += dx
-                    self.current_y += dy
-
-                speed = self.get_speed()
-                if speed > 0:
-                    time.sleep(0.001 / speed)
-                else:
-                    time.sleep(0.001)
+            
+            self.last_move_time = loop_start_time
+            
+            # Sleep to maintain target FPS
+            elapsed = time.perf_counter() - loop_start_time
+            sleep_time = target_frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
     def stop(self):
+        """Stop the mouse mover and clean up."""
         self.running = False
         if self.thread.is_alive():
-            self.thread.join()
+            self.thread.join(timeout=1.0)
         self.sock.close()
+        print("[*] MouseMover stopped")
+
+
+# For testing
+if __name__ == "__main__":
+    print("MouseMover test mode")
+    
+    # Mock settings
+    test_settings = {
+        "Aimbot.speed": 0.5,
+        "Aimbot.fps": 165,
+        "Aimbot.trigger_key": 0x05,
+        "Aimbot.movement_type": "classic",
+        "Aimbot.smoothing_factor": 0.5,
+        "Aimbot.acceleration_factor": 1.5,
+        "Aimbot.min_speed_multiplier": 3.0,
+        "Aimbot.max_speed_cap": 127,
+        "Aimbot.spring_stiffness": 150.0,
+        "Aimbot.spring_damping": 1.0,
+    }
+    
+    def get_setting(key, default):
+        return test_settings.get(key, default)
+    
+    mover = MouseMover(settings_getter=get_setting)
+    
+    try:
+        print("Testing movement... Press Ctrl+C to exit")
+        print("Hold mouse button 4 (trigger) to test")
+        
+        center_x, center_y = 960, 540
+        radius = 200
+        angle = 0
+        
+        frame_time = 1.0 / test_settings["Aimbot.fps"]
+        
+        while True:
+            loop_start = time.perf_counter()
+            
+            angle += 0.02
+            target_x = center_x + radius * math.cos(angle)
+            target_y = center_y + radius * math.sin(angle)
+            mover.set_mouse_position(target_x, target_y)
+            
+            elapsed = time.perf_counter() - loop_start
+            sleep_time = frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        mover.stop()

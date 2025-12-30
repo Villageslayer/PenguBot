@@ -180,6 +180,10 @@ class VisualWidget(QWidget):
         container_layout.addWidget(fov)
         self.config_manager.register_setting("Visual", "fov", fov)
 
+        aim_fov = SettingsBoolean("Display Aim FOV", True)
+        container_layout.addWidget(aim_fov)
+        self.config_manager.register_setting("Visual", "aim_fov", aim_fov)
+
         target = SettingsBoolean("Display Target", True)
         container_layout.addWidget(target)
         self.config_manager.register_setting("Visual", "target", target)
