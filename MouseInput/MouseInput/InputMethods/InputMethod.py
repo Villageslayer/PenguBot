@@ -1,0 +1,18 @@
+
+class InputMethod:
+    NAME:str = None
+    def __init__(self):
+        ...
+    def down(self,button):
+        ...
+    def up(self,button):
+        ...
+    def click(self,button):
+        ...
+    def moveRelative(self,x,y):
+        ...
+
+    def set_connection(self, ip, port, uuid):
+      self.ip = ip
+      self.port = port
+      self.uuid = uuid
