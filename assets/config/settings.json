@@ -1,7 +1,7 @@
 {
     "Aimbot": {
         "enabled": true,
-        "fov": 500.0,
+        "fov": 509.0,
         "target_height_1": 0.13,
         "target_height_2": 0.484,
         "speed": 0.125,
@@ -10,32 +10,44 @@
         "recoil": 0.01,
         "max_recoil": 1.0,
         "scout_macro": true,
-        "trigger_key": 5
+        "trigger_key": 5,
+        "aim_fov": 100.0,
+        "target_stickiness": 0.7,
+        "movement_type": "classic",
+        "max_speed_cap": 127.0,
+        "min_speed_multiplier": 0.15,
+        "smoothing_factor": 0.5,
+        "acceleration_factor": 1.5,
+        "spring_stiffness": 150.0,
+        "spring_damping": 0.997
     },
     "AI": {
         "confidence": 0.691,
         "nms_iou_threshold": 0.489,
-        "model": "arsenal.engine",
-        "max_fps_capture": 30
+        "model": "sunxds_0.8.1_FP8.engine",
+        "max_fps_capture": 66.0,
+        "training_enabled": false,
+        "training_confidence": 0.4
     },
     "Visual": {
         "fps": true,
-        "fov": false,
-        "target": false,
-        "fps_x": 2029.0,
-        "fps_y": 38.0,
+        "fov": true,
+        "target": true,
+        "fps_x": 0.0,
+        "fps_y": 0.0,
         "snow_effect": true,
-        "background_effect": "Neon Noise",
+        "background_effect": "Matrix",
         "box_esp": true,
         "box_style": "Corners",
         "snaplines": true,
         "info_text": true,
         "status_panel": true,
         "recoil_crosshair": true,
-        "radar": true
+        "radar": true,
+        "aim_fov": true
     },
     "Theme": {
-        "active": "Ocean"
+        "active": "Default"
     },
     "saved_configs": {
         "medium (ak-47)": {
@@ -60,7 +72,7 @@
                 },
                 "Visual": {
                     "fps": true,
-                    "fov": false,
+                    "fov": true,
                     "target": false,
                     "fps_x": 2029.0,
                     "fps_y": 38.0

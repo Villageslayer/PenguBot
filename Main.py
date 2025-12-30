@@ -3,14 +3,9 @@ import time
 import bettercam
 import cv2
 import cv2
-<<<<<<< HEAD
-#from render.inference_fps import FPSOverlay
-#from render.capture import ScreenCapture
-=======
 from render.inference_fps import FPSOverlay
 from render.capture import ScreenCapture
 from render.fov import FOVOverlay, AimFOVOverlay
->>>>>>> main
 from win32api import GetSystemMetrics
 from ObjectDetector import FastObjectDetector
 from gui.widgets.colors import theme_manager # Import theme_manager instead of Colors
